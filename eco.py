@@ -1,15 +1,27 @@
 import numpy as np
 import pandas as pd
 import csv
+import numpy_financial as npf
 
-import csv
+class TransportationScheme:
 
-class CostBenefitAnalysis:
-
+    the_all_week_value_of_time_for_an_average_car = 10.79 # pounds/h
+    coefficient_2010_to_2030 = 1.5893 # using the GDP deflator
+    Income_growth_previous_efficiency = 125.57 / 104.88 # using the annual parameters in WebTAG
+    the_value_of_time_2030 = the_all_week_value_of_time_for_an_average_car * coefficient_2010_to_2030 * Income_growth_previous_efficiency
+    long_term_growth_rate = 0.015
+    t = 0.19
+    tf1 = 0
+    tf = 0.05
+    tf_petrol = 0.2
+    tn1 = 0
+    tn = 0.19
+    discount_rate_before = 0.035
+    discount_rate_after = 0.03
     # 这里A代指新方案，O代指旧方案
     def __init__(self, csv_file_path, road_length_O=5, average_speed_O=22, AADT_O=15000,
                  road_length_A=9, average_speed_A=65, average_speed_A_O=28, AADT_A=13000,
-                 AADT_A_O=4000, construction_cost_A=90000000, maintenance_cost_A=10000):
+                 AADT_A_O=4000, construction_cost_A=90000000, maintenance_cost_A=10000, growth_rate = 0.01):
         # 设置scheme O变量
         self.road_length_O = road_length_O
         self.average_speed_O = average_speed_O
@@ -23,9 +35,18 @@ class CostBenefitAnalysis:
         self.AADT_A_O = AADT_A_O
         self.construction_cost_A = construction_cost_A
         self.maintenance_cost_A = maintenance_cost_A
+        self.growth_rate = growth_rate
 
         # 加载CSV文件数据
         self.data_dict = self.load_csv_data(csv_file_path)
+
+        # 计算未来AADT的值
+        self.future_AADT_A = self.get_future_AADT(self.AADT_A, self.growth_rate, 2031, 2090, 20)
+        self.future_AADT_A_O = self.get_future_AADT(self.AADT_A_O, self.growth_rate, 2031, 2090, 20)
+        self.future_AADT_O = self.get_future_AADT(self.AADT_O, self.growth_rate, 2031, 2090, 20, is_special_case=True)
+
+        # 计算未来价值的时间
+        self.value_of_time_dict = self.get_value_of_time(2031, 2091, self.the_value_of_time_2030, self.long_term_growth_rate)
 
     @staticmethod
     def load_csv_data(csv_file_path):
@@ -50,68 +71,136 @@ class CostBenefitAnalysis:
                 }
         return data_dict
     
-    def get_GC_work_fuel():
-        pass
+    def get_future_AADT(self, initial_aadt, growth_rate, start_year, end_year, change_years, is_special_case=False):
+        future_AADT_A = {}
+        for year in range(start_year, end_year + 1):
+            if year - start_year < change_years:
+                growth_years = year - start_year
+            else:
+                growth_years = change_years - 1
+            if is_special_case:
+                future_AADT_A[year] = initial_aadt * (1 + growth_rate) ** (growth_years + 1)
+            else:
+                future_AADT_A[year] = initial_aadt * (1 + growth_rate) ** growth_years
+        return future_AADT_A
 
-    def get_GC_work_non_fuel():
-        pass
+    def get_value_of_time(self, start_year, end_year, initial_value, growth_rate):
+        value_of_time_dict = {}
+        for year in range(start_year, end_year + 1):
+            value_of_time_dict[year] = initial_value * (1 + growth_rate) ** (year - start_year + 1)
+        return value_of_time_dict
 
-    def get_GC_non_work_fuel():
-        pass
+    def get_GC_fuel(self, year, road_length):
+        '''计算燃料成本, 单位为英镑'''
+        return self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 100
 
-    def get_GC_non_work_non_fuel():
-        pass
-
-    def get_GC_journey_time():
-        pass
-
-    def get_GC_emission():
-        pass
-
-    def get_GC_indirect_tax():
-        pass
-
-    def get_cost():
-        pass
+    def get_non_fuel_efficiency(self, type, average_speed):
+        if type == 'work':
+            return 1.157 + 135.946 / average_speed
+        else:
+            return 1.157 
+        
+    def get_GC_work_non_fuel(self, average_speed, road_length):
+        '''计算工作时非燃料成本, 单位为英镑'''
+        return self.get_non_fuel_efficiency('work', average_speed) * road_length * 1.5893 / 100
     
-    def get_benefit_by_ROH():
-        pass
+    def get_GC_non_work_non_fuel(self, average_speed, road_length):
+        '''计算非工作时非燃料成本, 单位为英镑，这部分视为净收益'''
+        return self.get_non_fuel_efficiency('non_work', average_speed) * road_length * 1.5893 / 100
 
-    def get_benefit_by_net():
-        pass
+    def get_GC_journey_time(self, year, average_speed, road_length):
+        '''计算旅行时间成本, 单位为英镑'''
+        return self.value_of_time_dict[year] * road_length / average_speed
 
-    def get_benefit():
-        pass
+    def get_GC_emission(self, year, road_length):
+        '''计算排放成本, 单位为英镑, 这部分视为净收益'''
+        return self.data_dict[year]['emission_factor'] * self.data_dict[year]['money_value_of_emission'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 1000
 
-    def get_NPV():
-        pass
+    def get_benefit_by_ROH(self, year, GC_A, GC_A_O, GC_O, ratio):
+        '''计算ROH'''
+        GC_average = (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year]) \
+            / (ratio * self.future_AADT_A[year] + ratio * self.future_AADT_A_O[year])
+        return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year] + self.future_AADT_O[year]) * 0.5 * 365.25
     
-    def get_PVB():
-        pass
+    def get_benefit_by_net(self, year, GC_A, GC_A_O, GC_O, ratio):
+        '''计算净收益'''
+        return (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year] - GC_O * ratio * self.future_AADT_O[year]) * 365.25
+        
+    def get_GC_indirect_tax(self, year, fuel_work_benefit, non_fuel_work_benefit, fuel_non_work_benefit, non_fuel_non_work_benefit):
+        '''计算间接税'''
+        return (fuel_work_benefit[year]) * self.tf1 * (1 + self.t) / (1 + self.tf1) \
+                + (non_fuel_work_benefit[year]) * self.tn1 * (1 + self.t) / (1 + self.tn1) \
+                + (fuel_non_work_benefit[year]) * self.tf * (self.tf - self.t) / (1 + self.tf) \
+                + (non_fuel_non_work_benefit[year]) * self.tn * (self.tn - self.t) / (1 + self.tn) 
 
-    def get_PVC():
-        pass
+    def get_construction_cost(self):
+        # 在项目第一年之前就一次性结清了
+        return self.construction_cost_A / 2 * (2 + self.discount_rate_before) * 1.5893
+    
+    def get_maintenance_cost(self):
+        return self.maintenance_cost_A * 1.5893
+    
+    def build_cash_flows(self, benefits, m_costs, initial_investment):
+        return  [-initial_investment]  + [benefits[year] - m_costs[year] for year in range(2031, 2091)]
+    
+    def discount_to_2030(self, values, end_year):
+        """
+        对给定的每年收益按年折现到2030年。
+        对于距2030年30年内的年份使用3.5%的折现率，超过30年的部分使用3%的折现率。
+        
+        参数:
+        values: 一个字典，键为年份，值为那一年的收益。
+        
+        返回:
+        2030年的折现总值。
+        """
+        discount_value = 0  # 初始化折现后的总值
+        for year, value in values.items():
+            if year > end_year:
+                continue
 
-    def get_BC_ratio():
-        pass
+            years_diff = year - 2030  # 计算与2030年的年差
+            if years_diff <= 30:
+                # 对于30年及以内的部分，使用3.5%的折现率
+                discount_factor = (1 + 0.035) ** years_diff
+            else:
+                # 对于超过30年的部分，前30年使用3.5%，之后使用3%
+                discount_factor_30 = (1 + 0.035) ** 30
+                discount_factor_after_30 = (1 + 0.03) ** (years_diff - 30)
+                discount_factor = discount_factor_30 * discount_factor_after_30
+            
+            discount_value += value / discount_factor  # 将该年的收益折现到2030年的价值，并累加到总值中
+        
+        return discount_value
+    def calculate_Payback_Period(self, benefits, costs, constant_cost):
+        for year in range(2031, 2091):
+            total_benefit = self.discount_to_2030(benefits, year)
+            total_cost = self.discount_to_2030(costs, year) + constant_cost
+            if total_benefit > total_cost:
+                return year 
+            
+    def calculate_financial_metrics(self, cash_flow, all_benefit, maintenance_cost_A):
+        pvb = self.discount_to_2030(all_benefit, 2090)
+        pvc = self.discount_to_2030(maintenance_cost_A, 2090) - cash_flow[0]
+        npv = pvb - pvc
+        bcr = pvb / pvc
 
-    def get_IRR():
-        pass
+        irr = npf.irr(cash_flow)  # 计算IRR
+        fyrr = cash_flow[1] / 1.035 / abs(cash_flow[0])  # 计算FYRR
+        
+        # 计算投资回收期
+        payback_period = self.calculate_Payback_Period(all_benefit, maintenance_cost_A, -cash_flow[0]) - 2030
+        
+        return {
+            'PVC': pvc,
+            'PVB': pvb,
+            'NPV': npv,
+            'BCR': bcr,
+            'IRR': irr,
+            'FYRR': fyrr,
+            'Payback Period': payback_period
+        }
 
-    def get_payback_period():
-        pass
-
-    def get_FYRR():
-        pass
+    
 
 
-# 假设你的CSV文件位于这个路径
-csv_file_path = 'voc.csv'
-
-# 创建TransportationScheme类的实例
-scheme_instance = CostBenefitAnalysis(csv_file_path)
-
-# 打印出一些数据来确认实例已正确加载数据
-print(f"Scheme O Road Length: {scheme_instance.road_length_O} km")
-print(f"Scheme A Average Speed: {scheme_instance.average_speed_A} km/h")
-print(f"Data Dictionary for a specific year (e.g., 2020): {scheme_instance.data_dict.get(2031)}")
