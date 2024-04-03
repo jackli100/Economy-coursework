@@ -4,11 +4,24 @@ import csv
 import numpy_financial as npf
 
 class TransportationScheme:
-
-    the_all_week_value_of_time_for_an_average_car = 10.79 # pounds/h
+    '''
+    P_ij : percieived cost between i and j;
+    F_ij : fuel cost between i and j;
+    N_ij : non-fuel cost between i and j, including indirect tax;
+    V_ij : value cost between i and j, V_ij = J_ij * K_T;
+    J_ij : journey time cost between i and j;
+    K_T : value of time;
+    K_F : cost of fuel;
+    D_ij : distance between i and j;
+    T_ij : number of trips between i and j;
+    t : average rate of indirect tax on final consumption;
+    t_f : rate of indirect tax on fuel as a final consumption good;
+    t_f1 : rate of indirect tax on fuel as an intermediate good;
+    t_n : rate of indirect tax on non-fuel vehicle operating costs as final consumption goods;
+    t_n1 : rate of indirect tax on non-fuel vehicle operating costs as intermediate goods;    
+    '''
     coefficient_2010_to_2030 = 1.5893 # using the GDP deflator
     Income_growth_previous_efficiency = 125.57 / 104.88 # using the annual parameters in WebTAG
-    the_value_of_time_2030 = the_all_week_value_of_time_for_an_average_car * coefficient_2010_to_2030 * Income_growth_previous_efficiency
     long_term_growth_rate = 0.015
     t = 0.19
     tf1 = 0
@@ -19,9 +32,10 @@ class TransportationScheme:
     discount_rate_before = 0.035
     discount_rate_after = 0.03
     # 这里A代指新方案，O代指旧方案
-    def __init__(self, csv_file_path, road_length_O=5, average_speed_O=22, AADT_O=15000,
+    def __init__(self, csv_file_path, value_of_time = 10.79, road_length_O=5, average_speed_O=22, AADT_O=15000,
                  road_length_A=9, average_speed_A=65, average_speed_A_O=28, AADT_A=13000,
-                 AADT_A_O=4000, construction_cost_A=90000000, maintenance_cost_A=10000, growth_rate = 0.01):
+                 AADT_A_O=4000, construction_cost_A=90000000, maintenance_cost_A=10000, growth_rate = 0.01, VAT = 0.05, project_life = 60,
+                 discount_rate_1 = 0.035, discount_rate_2 = 0.03):
         # 设置scheme O变量
         self.road_length_O = road_length_O
         self.average_speed_O = average_speed_O
@@ -36,6 +50,13 @@ class TransportationScheme:
         self.construction_cost_A = construction_cost_A
         self.maintenance_cost_A = maintenance_cost_A
         self.growth_rate = growth_rate
+        self.value_of_time_initial = value_of_time
+        self.the_value_of_time_2030 = self.value_of_time_initial * 1.5893 * 125.57 / 104.88
+        self.vat = VAT
+        self.project_life = project_life
+        self.end_year = 2030 + self.project_life
+        self.discount_rate_1 = discount_rate_1
+        self.discount_rate_2 = discount_rate_2
 
         # 加载CSV文件数据
         self.data_dict = self.load_csv_data(csv_file_path)
@@ -90,8 +111,10 @@ class TransportationScheme:
             value_of_time_dict[year] = initial_value * (1 + growth_rate) ** (year - start_year + 1)
         return value_of_time_dict
 
-    def get_GC_fuel(self, year, road_length):
+    def get_GC_fuel(self, year, road_length, charge_vat = False):
         '''计算燃料成本, 单位为英镑'''
+        if charge_vat:
+            return self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 100 * (1 + self.vat)
         return self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 100
 
     def get_non_fuel_efficiency(self, type, average_speed):
@@ -116,22 +139,24 @@ class TransportationScheme:
         '''计算排放成本, 单位为英镑, 这部分视为净收益'''
         return self.data_dict[year]['emission_factor'] * self.data_dict[year]['money_value_of_emission'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 1000
 
-    def get_benefit_by_ROH(self, year, GC_A, GC_A_O, GC_O, ratio):
+    def get_benefit_by_ROH(self, year, GC_A, GC_A_O, GC_O, ratio, vat_charge = False):
         '''计算ROH'''
         GC_average = (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year]) \
             / (ratio * self.future_AADT_A[year] + ratio * self.future_AADT_A_O[year])
+        if vat_charge:
+            return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year]) * 0.5 * 365.25 * (1 + self.t)
         return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year] + self.future_AADT_O[year]) * 0.5 * 365.25
     
     def get_benefit_by_net(self, year, GC_A, GC_A_O, GC_O, ratio):
         '''计算净收益'''
-        return (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year] - GC_O * ratio * self.future_AADT_O[year]) * 365.25
+        return (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year] - GC_O * ratio * self.future_AADT_O[year]) * 365.25 * -1
         
     def get_GC_indirect_tax(self, year, fuel_work_benefit, non_fuel_work_benefit, fuel_non_work_benefit, non_fuel_non_work_benefit):
         '''计算间接税'''
-        return (fuel_work_benefit[year]) * self.tf1 * (1 + self.t) / (1 + self.tf1) \
+        return ((fuel_work_benefit[year]) * self.tf1 * (1 + self.t) / (1 + self.tf1) \
                 + (non_fuel_work_benefit[year]) * self.tn1 * (1 + self.t) / (1 + self.tn1) \
                 + (fuel_non_work_benefit[year]) * self.tf * (self.tf - self.t) / (1 + self.tf) \
-                + (non_fuel_non_work_benefit[year]) * self.tn * (self.tn - self.t) / (1 + self.tn) 
+                + (non_fuel_non_work_benefit[year]) * self.tn * (self.tn - self.t) / (1 + self.tn) ) * (-1)
 
     def get_construction_cost(self):
         # 在项目第一年之前就一次性结清了
@@ -162,11 +187,11 @@ class TransportationScheme:
             years_diff = year - 2030  # 计算与2030年的年差
             if years_diff <= 30:
                 # 对于30年及以内的部分，使用3.5%的折现率
-                discount_factor = (1 + 0.035) ** years_diff
+                discount_factor = (1 + self.discount_rate_1) ** years_diff
             else:
                 # 对于超过30年的部分，前30年使用3.5%，之后使用3%
-                discount_factor_30 = (1 + 0.035) ** 30
-                discount_factor_after_30 = (1 + 0.03) ** (years_diff - 30)
+                discount_factor_30 = (1 + self.discount_rate_1) ** 30
+                discount_factor_after_30 = (1 + self.discount_rate_2) ** (years_diff - 30)
                 discount_factor = discount_factor_30 * discount_factor_after_30
             
             discount_value += value / discount_factor  # 将该年的收益折现到2030年的价值，并累加到总值中
@@ -180,8 +205,8 @@ class TransportationScheme:
                 return year 
             
     def calculate_financial_metrics(self, cash_flow, all_benefit, maintenance_cost_A):
-        pvb = self.discount_to_2030(all_benefit, 2090)
-        pvc = self.discount_to_2030(maintenance_cost_A, 2090) - cash_flow[0]
+        pvb = self.discount_to_2030(all_benefit, self.end_year)
+        pvc = self.discount_to_2030(maintenance_cost_A, self.end_year) - cash_flow[0]
         npv = pvb - pvc
         bcr = pvb / pvc
 
@@ -200,7 +225,7 @@ class TransportationScheme:
             'FYRR': fyrr,
             'Payback Period': payback_period
         }
-
+    
     
 
 

@@ -1,16 +1,57 @@
 from eco import TransportationScheme
+from analyze_transportation_scheme import analyze_transportation_scheme
+import csv
+
+def process_csv_column(input_csv_path, multiplier):
+    # 构造输出文件路径
+    parts = input_csv_path.rsplit('.', 1)
+    output_csv_path = f'{parts[0]}_processed.{parts[1]}'
+
+    # 读取CSV文件，并处理第四列
+    with open(input_csv_path, mode='r', encoding='utf-8') as infile, \
+         open(output_csv_path, mode='w', encoding='utf-8', newline='') as outfile:
+        reader = csv.reader(infile)
+        writer = csv.writer(outfile)
+
+        # 首先复制标题行
+        writer.writerow(next(reader))
+
+        # 遍历剩下的行，处理第四列
+        for row in reader:
+            if len(row) > 3:  # 确保行中有足够的列
+                row[3] = str(float(row[3]) * multiplier)  # 将第四列的值乘以指定的系数
+            writer.writerow(row)
+
+    # 处理完成
+    print(f'CSV文件已处理完成并保存为: {output_csv_path}')
 
 SchemeA1 = TransportationScheme('voc.csv')
 SchemeA2 = TransportationScheme('voc.csv', growth_rate=0.02)
-schemeB = TransportationScheme('voc.csv', road_length_A = 11, \
+schemeB1 = TransportationScheme('voc.csv', road_length_A = 11, \
         AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000)
 schemeB2 = TransportationScheme('voc.csv', road_length_A = 11, \
         AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000, growth_rate = 0.02)
-
+result = analyze_transportation_scheme(SchemeA1)
+print(result)
 optimism_bias_uplifts = 1.46
+# 分析资本成本的敏感性
 constuction_cost_uplifts_A = 1.46 * 90000000
 constuction_cost_uplifts_B = 1.46 * 77000000
-SchemeA1.set_construction_cost(constuction_cost_uplifts_A)
-SchemeA2.set_construction_cost(constuction_cost_uplifts_A)
-schemeB.set_construction_cost(constuction_cost_uplifts_B)
-schemeB2.set_construction_cost(constuction_cost_uplifts_B)
+SchemeA1_2 = TransportationScheme('voc.csv', construction_cost_A=1.46 * 90000000)
+result_uplifted = analyze_transportation_scheme(SchemeA1_2)
+
+# 分析时间价值
+SchemeA1_3 = TransportationScheme('voc.csv', value_of_time = 10.79 / 1.46, growth_rate=0.02)
+result_time_value = analyze_transportation_scheme(SchemeA1_3)
+# the value of Greenhouse Gas emissions
+# 分析排放成本
+process_csv_column('voc.csv', 1.46)
+SchemeA1_4 = TransportationScheme('voc_processed.csv')
+result_emission = analyze_transportation_scheme(SchemeA1_4)
+# 分析项目寿命
+SchemeA1_5 = TransportationScheme('voc.csv', project_life = 60 / 1.46)
+
+# 分析折扣率
+SchemeA1_6 = TransportationScheme('voc.csv', discount_rate_1 = 0.035 * 1.46, discount_rate_2 = 0.03 * 1.46)
+result_discount_rate = analyze_transportation_scheme(SchemeA1_6)
+print(result_discount_rate)
