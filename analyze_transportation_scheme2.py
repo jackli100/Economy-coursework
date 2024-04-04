@@ -49,13 +49,13 @@ def analyze_transportation_scheme(scheme, output_file='A_low.xlsx', write_to_exc
 
 def update_costs_benefits_for_year(scheme, year, costs_benefits):
     # 更新工作时候的燃料成本
-    costs_benefits['GC_work_fuel_cost_A'][year] = scheme.get_GC_fuel(year, scheme.road_length_A)
-    costs_benefits['GC_work_fuel_cost_A_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O)
-    costs_benefits['GC_work_fuel_cost_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O)
+    costs_benefits['GC_work_fuel_cost_A'][year] = scheme.get_GC_fuel(year, scheme.road_length_A, scheme.average_speed_A)
+    costs_benefits['GC_work_fuel_cost_A_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, scheme.average_speed_A_O)
+    costs_benefits['GC_work_fuel_cost_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, scheme.average_speed_O)
     # 更新非工作时候的燃料成本, 考虑了VAT
-    costs_benefits['GC_non_work_fuel_cost_A'][year] = scheme.get_GC_fuel(year, scheme.road_length_A, True)
-    costs_benefits['GC_non_work_fuel_cost_A_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, True)
-    costs_benefits['GC_non_work_fuel_cost_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, True)
+    costs_benefits['GC_non_work_fuel_cost_A'][year] = scheme.get_GC_fuel(year, scheme.road_length_A, scheme.average_speed_A ,True)
+    costs_benefits['GC_non_work_fuel_cost_A_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, scheme.average_speed_A_O, True)
+    costs_benefits['GC_non_work_fuel_cost_O'][year] = scheme.get_GC_fuel(year, scheme.road_length_O, scheme.average_speed_O, True)
 
     # 更新工作时非燃料成本
     costs_benefits['GC_work_non_fuel_A'][year] = scheme.get_GC_work_non_fuel(scheme.average_speed_A, scheme.road_length_A)
@@ -63,9 +63,9 @@ def update_costs_benefits_for_year(scheme, year, costs_benefits):
     costs_benefits['GC_work_non_fuel_O'][year] = scheme.get_GC_work_non_fuel(scheme.average_speed_O, scheme.road_length_O)
 
     # 更新非工作时非燃料成本
-    costs_benefits['GC_non_work_non_fuel_A'][year] = scheme.get_GC_non_work_non_fuel(scheme.average_speed_A, scheme.road_length_A)
-    costs_benefits['GC_non_work_non_fuel_A_O'][year] = scheme.get_GC_non_work_non_fuel(scheme.average_speed_A_O, scheme.road_length_A)
-    costs_benefits['GC_non_work_non_fuel_O'][year] = scheme.get_GC_non_work_non_fuel(scheme.average_speed_O, scheme.road_length_O)
+    costs_benefits['GC_non_work_non_fuel_A'][year] = scheme.get_GC_non_work_non_fuel(scheme.road_length_A)
+    costs_benefits['GC_non_work_non_fuel_A_O'][year] = scheme.get_GC_non_work_non_fuel(scheme.road_length_A)
+    costs_benefits['GC_non_work_non_fuel_O'][year] = scheme.get_GC_non_work_non_fuel(scheme.road_length_O)
 
     # 更新旅行时间成本
     costs_benefits['GC_journey_time_A'][year] = scheme.get_GC_journey_time(year, scheme.average_speed_A, scheme.road_length_A)
@@ -73,9 +73,9 @@ def update_costs_benefits_for_year(scheme, year, costs_benefits):
     costs_benefits['GC_journey_time_O'][year] = scheme.get_GC_journey_time(year, scheme.average_speed_O, scheme.road_length_O)
 
     # 更新排放成本
-    costs_benefits['GC_emission_A'][year] = scheme.get_GC_emission(year, scheme.road_length_A)
-    costs_benefits['GC_emission_A_O'][year] = scheme.get_GC_emission(year, scheme.road_length_O)
-    costs_benefits['GC_emission_O'][year] = scheme.get_GC_emission(year, scheme.road_length_O)
+    costs_benefits['GC_emission_A'][year] = scheme.get_GC_emission(year, scheme.average_speed_A, scheme.road_length_A)
+    costs_benefits['GC_emission_A_O'][year] = scheme.get_GC_emission(year, scheme.average_speed_A_O, scheme.road_length_A)
+    costs_benefits['GC_emission_O'][year] = scheme.get_GC_emission(year, scheme.average_speed_O, scheme.road_length_O)
 
     # 更新收益
     w, nw = 0.053, 0.947  # 权重值

@@ -25,21 +25,22 @@ class TransportationScheme:
     long_term_growth_rate = 0.015
     t = 0.19
     tf1 = 0
-    tf = 0.05
     tf_petrol = 0.2
     tn1 = 0
     tn = 0.19
     discount_rate_before = 0.035
     discount_rate_after = 0.03
     # 这里A代指新方案，O代指旧方案
-    def __init__(self, csv_file_path, value_of_time = 10.79, road_length_O=5, average_speed_O=22, AADT_O=15000,
+    def __init__(self, csv_file_path = 'voc.csv', transport_scheme_name = 'A_low', value_of_time = 10.79, road_length_O=5, average_speed_O=22, AADT_O=15000,
                  road_length_A=9, average_speed_A=65, average_speed_A_O=28, AADT_A=13000,
                  AADT_A_O=4000, construction_cost_A=90000000, maintenance_cost_A=10000, growth_rate = 0.01, VAT = 0.05, project_life = 60,
                  discount_rate_1 = 0.035, discount_rate_2 = 0.03):
+        self.transport_scheme_name = transport_scheme_name
         # 设置scheme O变量
         self.road_length_O = road_length_O
         self.average_speed_O = average_speed_O
         self.AADT_O = AADT_O
+        
 
         # 设置scheme A变量
         self.road_length_A = road_length_A
@@ -57,6 +58,7 @@ class TransportationScheme:
         self.end_year = 2030 + self.project_life
         self.discount_rate_1 = discount_rate_1
         self.discount_rate_2 = discount_rate_2
+        self.tf = 0.05
 
         # 加载CSV文件数据
         self.data_dict = self.load_csv_data(csv_file_path)
@@ -68,6 +70,45 @@ class TransportationScheme:
 
         # 计算未来价值的时间
         self.value_of_time_dict = self.get_value_of_time(2031, 2091, self.the_value_of_time_2030, self.long_term_growth_rate)
+        
+        # 大字典存储所有的成本和收益
+        self.costs_benefits = {
+        'GC_work_fuel_cost_A': {},
+        'GC_work_fuel_cost_A_O': {},
+        'GC_work_fuel_cost_O': {},
+        'GC_non_work_fuel_cost_A': {},
+        'GC_non_work_fuel_cost_A_O': {},
+        'GC_non_work_fuel_cost_O': {},
+        'GC_work_non_fuel_A': {},
+        'GC_work_non_fuel_A_O': {},
+        'GC_work_non_fuel_O': {},
+        'GC_non_work_non_fuel_A': {},
+        'GC_non_work_non_fuel_A_O': {},
+        'GC_non_work_non_fuel_O': {},
+        'GC_journey_time_A': {},
+        'GC_journey_time_A_O': {},
+        'GC_journey_time_O': {},
+        'GC_emission_A': {},
+        'GC_emission_A_O': {},
+        'GC_emission_O': {},
+        'fuel_work_benefit': {},
+        'non_fuel_work_benefit': {},
+        'fuel_non_work_benefit': {},
+        'non_fuel_non_work_benefit': {},
+        'indirect_tax_revenue': {},
+        'journey_time_work_benefit': {},
+        'journey_time_non_work_benefit': {},
+        'emission_benefit': {},
+        'all_benefit': {},
+        'construction_cost_A': None,
+        'maintenance_cost_A': {}
+    }
+        for year in range(2031, 2091):
+            self.update_costs_benefits_for_year(year, self.costs_benefits)
+        self.cash_flow = self.build_cash_flows(self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'], self.costs_benefits['construction_cost_A'])
+        self.financial_metrics = self.calculate_financial_metrics(self.cash_flow, \
+                                self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'])
+        
 
     @staticmethod
     def load_csv_data(csv_file_path):
@@ -89,10 +130,28 @@ class TransportationScheme:
                     'non_work_petrol_fuel_price_65': float(row[8]),
                     'non_work_petrol_fuel_price_28': float(row[9]),
                     'non_work_petrol_fuel_price_22': float(row[10]),
+                    'work_electricity_price': float(row[11]),
+                    'non_work_electricity_price': float(row[12]),
                 }
         return data_dict
     
     def get_future_AADT(self, initial_aadt, growth_rate, start_year, end_year, change_years, is_special_case=False):
+        '''
+        Calculate the future Average Annual Daily Traffic (AADT) based on the initial AADT,
+        growth rate, start year, end year, and number of years with growth rate change.
+
+        Parameters:
+        - initial_aadt (float): The initial AADT value.
+        - growth_rate (float): The growth rate as a decimal value.
+        - start_year (int): The starting year for the calculation.
+        - end_year (int): The ending year for the calculation.
+        - change_years (int): The number of years with growth rate change.
+        - is_special_case (bool, optional): Whether the calculation is a special case.
+
+        Returns:
+        - future_AADT_A (dict): A dictionary containing the future AADT values for each year.
+
+        '''
         future_AADT_A = {}
         for year in range(start_year, end_year + 1):
             if year - start_year < change_years:
@@ -112,10 +171,17 @@ class TransportationScheme:
         return value_of_time_dict
 
     def get_GC_fuel(self, year, road_length, charge_vat = False):
-        '''计算燃料成本, 单位为英镑'''
+        '''
+        计算燃料成本, 单位为英镑
+        只对非工作时候的燃料成本进行VAT计算
+        '''
         if charge_vat:
-            return self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 100 * (1 + self.vat)
-        return self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 100
+            return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
+                + self.data_dict[year]['non_work_electricity_price']) \
+                * road_length * 1.5893 / 100  * (1 + self.vat)
+        return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
+                self.data_dict[year]['work_electricity_price']) \
+                * road_length * 1.5893 / 100   
 
     def get_non_fuel_efficiency(self, type, average_speed):
         if type == 'work':
@@ -153,8 +219,8 @@ class TransportationScheme:
         
     def get_GC_indirect_tax(self, year, fuel_work_benefit, non_fuel_work_benefit, fuel_non_work_benefit, non_fuel_non_work_benefit):
         '''计算间接税'''
-        return ((fuel_work_benefit[year]) * self.tf1 * (1 + self.t) / (1 + self.tf1) \
-                + (non_fuel_work_benefit[year]) * self.tn1 * (1 + self.t) / (1 + self.tn1) \
+        return ((fuel_work_benefit[year]) * self.tf1 / (1 + self.tf1) \
+                + (non_fuel_work_benefit[year]) * self.tn1  / (1 + self.tn1) \
                 + (fuel_non_work_benefit[year]) * self.tf * (self.tf - self.t) / (1 + self.tf) \
                 + (non_fuel_non_work_benefit[year]) * self.tn * (self.tn - self.t) / (1 + self.tn) ) * (-1)
 
@@ -214,7 +280,11 @@ class TransportationScheme:
         fyrr = cash_flow[1] / 1.035 / abs(cash_flow[0])  # 计算FYRR
         
         # 计算投资回收期
-        payback_period = self.calculate_Payback_Period(all_benefit, maintenance_cost_A, -cash_flow[0]) - 2030
+        payback_period = self.calculate_Payback_Period(all_benefit, maintenance_cost_A, (-1) * cash_flow[0])
+        if payback_period is None:
+            payback_period = 'N/A'
+        else:
+            payback_period = payback_period - 2030
         
         return {
             'PVC': pvc,
@@ -226,6 +296,97 @@ class TransportationScheme:
             'Payback Period': payback_period
         }
     
+    def update_costs_benefits_for_year(self, year, costs_benefits):
+        
+        # 更新工作时候的燃料成本
+        costs_benefits['GC_work_fuel_cost_A'][year] = self.get_GC_fuel(year, self.road_length_A)
+        costs_benefits['GC_work_fuel_cost_A_O'][year] = self.get_GC_fuel(year, self.road_length_O)
+        costs_benefits['GC_work_fuel_cost_O'][year] = self.get_GC_fuel(year, self.road_length_O)
+        # 更新非工作时候的燃料成本, 考虑了VAT
+        costs_benefits['GC_non_work_fuel_cost_A'][year] = self.get_GC_fuel(year, self.road_length_A, True)
+        costs_benefits['GC_non_work_fuel_cost_A_O'][year] = self.get_GC_fuel(year, self.road_length_O, True)
+        costs_benefits['GC_non_work_fuel_cost_O'][year] = self.get_GC_fuel(year, self.road_length_O, True)
+
+        # 更新工作时非燃料成本
+        costs_benefits['GC_work_non_fuel_A'][year] = self.get_GC_work_non_fuel(self.average_speed_A, self.road_length_A)
+        costs_benefits['GC_work_non_fuel_A_O'][year] = self.get_GC_work_non_fuel(self.average_speed_A_O, self.road_length_A)
+        costs_benefits['GC_work_non_fuel_O'][year] = self.get_GC_work_non_fuel(self.average_speed_O, self.road_length_O)
+
+        # 更新非工作时非燃料成本
+        costs_benefits['GC_non_work_non_fuel_A'][year] = self.get_GC_non_work_non_fuel(self.average_speed_A, self.road_length_A)
+        costs_benefits['GC_non_work_non_fuel_A_O'][year] = self.get_GC_non_work_non_fuel(self.average_speed_A_O, self.road_length_A)
+        costs_benefits['GC_non_work_non_fuel_O'][year] = self.get_GC_non_work_non_fuel(self.average_speed_O, self.road_length_O)
+
+        # 更新旅行时间成本
+        costs_benefits['GC_journey_time_A'][year] = self.get_GC_journey_time(year, self.average_speed_A, self.road_length_A)
+        costs_benefits['GC_journey_time_A_O'][year] = self.get_GC_journey_time(year, self.average_speed_A_O, self.road_length_O)
+        costs_benefits['GC_journey_time_O'][year] = self.get_GC_journey_time(year, self.average_speed_O, self.road_length_O)
+
+        # 更新排放成本
+        costs_benefits['GC_emission_A'][year] = self.get_GC_emission(year, self.road_length_A)
+        costs_benefits['GC_emission_A_O'][year] = self.get_GC_emission(year, self.road_length_O)
+        costs_benefits['GC_emission_O'][year] = self.get_GC_emission(year, self.road_length_O)
+
+        # 更新收益
+        w, nw = 0.053, 0.947  # 权重值
+        costs_benefits['fuel_work_benefit'][year] = self.get_benefit_by_ROH(year, costs_benefits['GC_work_fuel_cost_A'][year], \
+                                                    costs_benefits['GC_work_fuel_cost_A_O'][year], costs_benefits['GC_work_fuel_cost_O'][year], w, True)
+        costs_benefits['non_fuel_work_benefit'][year] = self.get_benefit_by_ROH(year, costs_benefits['GC_work_non_fuel_A'][year], \
+                                                    costs_benefits['GC_work_non_fuel_A_O'][year], costs_benefits['GC_work_non_fuel_O'][year], w, True)
+        costs_benefits['fuel_non_work_benefit'][year] = self.get_benefit_by_ROH(year, costs_benefits['GC_non_work_fuel_cost_A'][year], \
+                                                    costs_benefits['GC_non_work_fuel_cost_A_O'][year], costs_benefits['GC_non_work_fuel_cost_O'][year], nw)
+        costs_benefits['non_fuel_non_work_benefit'][year] = self.get_benefit_by_net(year, costs_benefits['GC_non_work_non_fuel_A'][year],\
+                                                            costs_benefits['GC_non_work_non_fuel_A_O'][year], costs_benefits['GC_non_work_non_fuel_O'][year], nw)
+        costs_benefits['journey_time_work_benefit'][year] = self.get_benefit_by_ROH(year, costs_benefits['GC_journey_time_A'][year], \
+                                                            costs_benefits['GC_journey_time_A_O'][year], costs_benefits['GC_journey_time_O'][year], w, True)
+        costs_benefits['journey_time_non_work_benefit'][year] = self.get_benefit_by_ROH(year, costs_benefits['GC_journey_time_A'][year], \
+                                                            costs_benefits['GC_journey_time_A_O'][year], costs_benefits['GC_journey_time_O'][year], nw)
+        
+        costs_benefits['emission_benefit'][year] = self.get_benefit_by_net(year, costs_benefits['GC_emission_A'][year], costs_benefits['GC_emission_A_O'][year], costs_benefits['GC_emission_O'][year], 1)
+
+        # 间接税收入、维护成本和建设成本的更新
+        costs_benefits['indirect_tax_revenue'][year] = self.get_GC_indirect_tax(year, costs_benefits['fuel_work_benefit'], costs_benefits['non_fuel_work_benefit'], costs_benefits['fuel_non_work_benefit'], costs_benefits['non_fuel_non_work_benefit'])
+        costs_benefits['maintenance_cost_A'][year] = self.get_maintenance_cost()
+        costs_benefits['construction_cost_A'] = self.get_construction_cost()
+        costs_benefits['all_benefit'][year] = costs_benefits['fuel_work_benefit'][year] + costs_benefits['non_fuel_work_benefit'][year] + \
+                                            costs_benefits['fuel_non_work_benefit'][year] + costs_benefits['non_fuel_non_work_benefit'][year] \
+                                            + costs_benefits['indirect_tax_revenue'][year] + costs_benefits['journey_time_work_benefit'][year] + \
+                                                costs_benefits['journey_time_non_work_benefit'][year] + costs_benefits['emission_benefit'][year]
+        return costs_benefits
+    
+    def print_financial_metrics(self):
+
+        print('self.transport_scheme_name:', self.transport_scheme_name)
+        print('financial_metrics:', self.financial_metrics)
+
+    def prepare_data_for_excel(self, costs_benefits, financial_metrics):
+        
+        data = {'Year': list(costs_benefits['all_benefit'].keys()),
+            'Fuel Work Benefit': list(costs_benefits['fuel_work_benefit'].values()),
+            'Non Fuel Work Benefit': list(costs_benefits['non_fuel_work_benefit'].values()),
+            'Fuel Non Work Benefit': list(costs_benefits['fuel_non_work_benefit'].values()),
+            'Non Fuel Non Work Benefit': list(costs_benefits['non_fuel_non_work_benefit'].values()),
+            'Indirect Tax Revenue': list(costs_benefits['indirect_tax_revenue'].values()),
+            'Journey Time Work Benefit': list(costs_benefits['journey_time_work_benefit'].values()),
+            'Journey Time Non Work Benefit': list(costs_benefits['journey_time_non_work_benefit'].values()),
+            'Emission Benefit': list(costs_benefits['emission_benefit'].values()),
+            'All Benefit': list(costs_benefits['all_benefit'].values()),
+            'Maintenance Cost': list(costs_benefits['maintenance_cost_A'].values()),
+            'Construction Cost': [costs_benefits['construction_cost_A']] + [None] * (len(costs_benefits['all_benefit']) - 1)
+              }
+    
+        summary_data = {key: [value] for key, value in financial_metrics.items()}
+
+        return pd.DataFrame(data), pd.DataFrame(summary_data)
+    
+    def save_data_to_excel(self, file_path):
+        
+        data, summary_data = self.prepare_data_for_excel(self.costs_benefits, self.financial_metrics)
+        with pd.ExcelWriter(file_path) as writer:
+            data.to_excel(writer, sheet_name='Benefits and Costs', index=False)
+            summary_data.to_excel(writer, sheet_name='Financial Indicators', index=False)
     
 
-
+if __name__ == '__main__':
+    scheme_A_low = TransportationScheme('voc.csv')
+    scheme_A_low.print_financial_metrics()

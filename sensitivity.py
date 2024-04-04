@@ -1,5 +1,4 @@
 from eco import TransportationScheme
-from analyze_transportation_scheme import analyze_transportation_scheme
 import csv
 
 def process_csv_column(input_csv_path, multiplier):
@@ -24,34 +23,46 @@ def process_csv_column(input_csv_path, multiplier):
 
     # 处理完成
     print(f'CSV文件已处理完成并保存为: {output_csv_path}')
+result_dict ={}
 
-SchemeA1 = TransportationScheme('voc.csv')
-SchemeA2 = TransportationScheme('voc.csv', growth_rate=0.02)
-schemeB1 = TransportationScheme('voc.csv', road_length_A = 11, \
-        AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000)
-schemeB2 = TransportationScheme('voc.csv', road_length_A = 11, \
-        AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000, growth_rate = 0.02)
-result = analyze_transportation_scheme(SchemeA1)
-print(result)
-optimism_bias_uplifts = 1.46
-# 分析资本成本的敏感性
-constuction_cost_uplifts_A = 1.46 * 90000000
-constuction_cost_uplifts_B = 1.46 * 77000000
-SchemeA1_2 = TransportationScheme('voc.csv', construction_cost_A=1.46 * 90000000)
-result_uplifted = analyze_transportation_scheme(SchemeA1_2)
+def sensitive_analysis():
+    SchemeA1 = TransportationScheme('voc.csv')
+    SchemeA2 = TransportationScheme('voc.csv', growth_rate=0.02)
+    schemeB1 = TransportationScheme('voc.csv', road_length_A = 11, \
+            AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000)
+    schemeB2 = TransportationScheme('voc.csv', road_length_A = 11, \
+            AADT_A=13500, AADT_A_O=3500, construction_cost_A=77000000, maintenance_cost_A=10000, growth_rate = 0.02)
+    result_original = SchemeA1.financial_metrics
+    result_dict['result_original'] = result_original
+    optimism_bias_uplifts = 1.46
+    # 分析资本成本的敏感性
+    constuction_cost_uplifts_A = 1.46 * 90000000
+    constuction_cost_uplifts_B = 1.46 * 77000000
+    SchemeA1_2 = TransportationScheme('voc.csv', construction_cost_A=1.46 * 90000000)
+    result_construciton = SchemeA1_2.financial_metrics
+    result_dict['result_construciton'] = result_construciton
 
-# 分析时间价值
-SchemeA1_3 = TransportationScheme('voc.csv', value_of_time = 10.79 / 1.46, growth_rate=0.02)
-result_time_value = analyze_transportation_scheme(SchemeA1_3)
-# the value of Greenhouse Gas emissions
-# 分析排放成本
-process_csv_column('voc.csv', 1.46)
-SchemeA1_4 = TransportationScheme('voc_processed.csv')
-result_emission = analyze_transportation_scheme(SchemeA1_4)
-# 分析项目寿命
-SchemeA1_5 = TransportationScheme('voc.csv', project_life = 60 / 1.46)
+    # 分析时间价值
+    SchemeA1_3 = TransportationScheme('voc.csv', value_of_time = 10.79 / 1.46, growth_rate=0.02)
+    result_time_value = SchemeA1_3.financial_metrics
+    result_dict['result_time_value'] = result_time_value
+    # the value of Greenhouse Gas emissions
+    # 分析排放成本
+    process_csv_column('voc.csv', 1.46)
+    SchemeA1_4 = TransportationScheme('voc_processed.csv')
+    result_emission = SchemeA1_4.financial_metrics
+    result_dict['result_emission'] = result_emission
+    # 分析项目寿命
+    SchemeA1_5 = TransportationScheme('voc.csv', project_life = 60 / 1.46)
+    result_project_life = SchemeA1_5.financial_metrics
+    result_dict['result_project_life'] = result_project_life
 
-# 分析折扣率
-SchemeA1_6 = TransportationScheme('voc.csv', discount_rate_1 = 0.035 * 1.46, discount_rate_2 = 0.03 * 1.46)
-result_discount_rate = analyze_transportation_scheme(SchemeA1_6)
-print(result_discount_rate)
+    # 分析折扣率
+    SchemeA1_6 = TransportationScheme('voc.csv', discount_rate_1 = 0.035 * 1.46, discount_rate_2 = 0.03 * 1.46)
+    result_discount_rate = SchemeA1_6.financial_metrics
+    result_dict['result_discount_rate'] = result_discount_rate
+
+    return result_dict
+
+if __name__ == '__main__':
+    sensitive_analysis()
