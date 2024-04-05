@@ -53,7 +53,8 @@ class TransportationScheme:
         self.growth_rate = growth_rate
         self.value_of_time_initial = value_of_time
         self.the_value_of_time_2030 = self.value_of_time_initial * 1.5893 * 125.57 / 104.88
-        self.vat = VAT
+        self.vat_electricity = 0.05
+        self.vat_petrol = 0.2
         self.project_life = project_life
         self.end_year = 2030 + self.project_life
         self.discount_rate_1 = discount_rate_1
@@ -170,15 +171,15 @@ class TransportationScheme:
             value_of_time_dict[year] = initial_value * (1 + growth_rate) ** (year - start_year + 1)
         return value_of_time_dict
 
-    def get_GC_fuel(self, year, road_length, charge_vat = False):
+    def get_GC_fuel(self, year, road_length, non_work = False):
         '''
         计算燃料成本, 单位为英镑
         只对非工作时候的燃料成本进行VAT计算
         '''
-        if charge_vat:
+        if non_work:
             return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
                 + self.data_dict[year]['non_work_electricity_price']) \
-                * road_length * 1.5893 / 100  * (1 + self.vat)
+                * road_length * 1.5893 / 100  * (1 + self.vat_electricity)
         return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
                 self.data_dict[year]['work_electricity_price']) \
                 * road_length * 1.5893 / 100   
@@ -203,7 +204,8 @@ class TransportationScheme:
 
     def get_GC_emission(self, year, road_length):
         '''计算排放成本, 单位为英镑, 这部分视为净收益'''
-        return self.data_dict[year]['emission_factor'] * self.data_dict[year]['money_value_of_emission'] * self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 1000
+        return self.data_dict[year]['emission_factor'] * self.data_dict[year]['money_value_of_emission'] * \
+            self.data_dict[year]['fuel_efficiency'] * road_length * 1.5893 / 1000 * (1 + self.t)
 
     def get_benefit_by_ROH(self, year, GC_A, GC_A_O, GC_O, ratio, vat_charge = False):
         '''计算ROH'''
@@ -234,6 +236,17 @@ class TransportationScheme:
     def build_cash_flows(self, benefits, m_costs, initial_investment):
         return  [-initial_investment]  + [benefits[year] - m_costs[year] for year in range(2031, 2091)]
     
+    def discount_every_year(self, values):
+        '''对给定的每年收益按年折现'''
+        for year, value in values.items():
+            if year <= 2060:
+                discount_factor = (1 + self.discount_rate_before) ** (year - 2030)
+            else:
+                discount_factor = (1 + self.discount_rate_after) ** (year - 2060) * (1 + self.discount_rate_before) ** 30
+            values[year] = value / discount_factor
+        return values
+
+
     def discount_to_2030(self, values, end_year):
         """
         对给定的每年收益按年折现到2030年。
