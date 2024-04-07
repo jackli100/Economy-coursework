@@ -15,10 +15,10 @@ def process_csv_column(input_csv_path, multiplier):
         # 首先复制标题行
         writer.writerow(next(reader))
 
-        # 遍历剩下的行，处理第四列
+        # 遍历剩下的行，处理第五列
         for row in reader:
             if len(row) > 4:  # 确保行中有足够的列
-                row[4] = str(float(row[4]) * multiplier)  # 将第四列的值乘以指定的系数
+                row[4] = str(float(row[4]) * multiplier)  # 将第五列的值乘以指定的系数
             writer.writerow(row)
 
     # 处理完成
