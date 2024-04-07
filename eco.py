@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import csv
 import numpy_financial as npf
-
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 class TransportationScheme:
     '''
     P_ij : percieived cost between i and j;
@@ -28,8 +29,6 @@ class TransportationScheme:
     tf_petrol = 0.2
     tn1 = 0
     tn = 0.19
-    discount_rate_before = 0.035
-    discount_rate_after = 0.03
     # 这里A代指新方案，O代指旧方案
     def __init__(self, csv_file_path = 'voc.csv', transport_scheme_name = 'A_low', value_of_time = 10.79, road_length_O=5, average_speed_O=22, AADT_O=15000,
                  road_length_A=9, average_speed_A=65, average_speed_A_O=28, AADT_A=13000,
@@ -59,18 +58,21 @@ class TransportationScheme:
         self.end_year = 2030 + self.project_life
         self.discount_rate_1 = discount_rate_1
         self.discount_rate_2 = discount_rate_2
+        self.discount_rate_before = discount_rate_1
+        self.discount_rate_after = discount_rate_2
         self.tf = 0.05
-
+        self.financial_metrics = {}
+        self.csv_file_path = csv_file_path
         # 加载CSV文件数据
-        self.data_dict = self.load_csv_data(csv_file_path)
+        self.data_dict = self.load_csv_data()
 
         # 计算未来AADT的值
-        self.future_AADT_A = self.get_future_AADT(self.AADT_A, self.growth_rate, 2031, 2090, 20)
-        self.future_AADT_A_O = self.get_future_AADT(self.AADT_A_O, self.growth_rate, 2031, 2090, 20)
-        self.future_AADT_O = self.get_future_AADT(self.AADT_O, self.growth_rate, 2031, 2090, 20, is_special_case=True)
+        self.future_AADT_A = self.get_future_AADT(self.AADT_A, self.growth_rate, 2031, self.end_year, 20)
+        self.future_AADT_A_O = self.get_future_AADT(self.AADT_A_O, self.growth_rate, 2031, self.end_year, 20)
+        self.future_AADT_O = self.get_future_AADT(self.AADT_O, self.growth_rate, 2031,  self.end_year, 20, is_special_case=True)
 
         # 计算未来价值的时间
-        self.value_of_time_dict = self.get_value_of_time(2031, 2091, self.the_value_of_time_2030, self.long_term_growth_rate)
+        self.value_of_time_dict = self.get_value_of_time(2031, self.end_year + 1, self.the_value_of_time_2030, self.long_term_growth_rate)
         
         # 大字典存储所有的成本和收益
         self.costs_benefits = {
@@ -104,18 +106,24 @@ class TransportationScheme:
         'construction_cost_A': None,
         'maintenance_cost_A': {}
     }
-        for year in range(2031, 2091):
+        
+    def get_things_done(self, discount_or_not = True):
+        ''''调用更新的方法，更新所有的成本和收益，还有现金流'''
+        for year in range(2031, self.end_year + 1):
             self.update_costs_benefits_for_year(year, self.costs_benefits)
         self.cash_flow = self.build_cash_flows(self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'], self.costs_benefits['construction_cost_A'])
+        if discount_or_not:
+            for key, value in self.costs_benefits.items():
+                if key != 'construction_cost_A':
+                    self.costs_benefits[key] = self.discount_every_year(self.costs_benefits[key])
         self.financial_metrics = self.calculate_financial_metrics(self.cash_flow, \
-                                self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'])
-        
-
-    @staticmethod
-    def load_csv_data(csv_file_path):
+                    self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'])
+  
+    
+    def load_csv_data(self):
         """加载CSV文件数据到字典"""
         data_dict = {}
-        with open(csv_file_path, mode='r', encoding='utf-8') as file:
+        with open(self.csv_file_path, mode='r', encoding='utf-8') as file:
             reader = csv.reader(file)
             next(reader)  # 跳过标题行
             for row in reader:
@@ -177,12 +185,8 @@ class TransportationScheme:
         只对非工作时候的燃料成本进行VAT计算
         '''
         if non_work:
-            return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
-                + self.data_dict[year]['non_work_electricity_price']) \
-                * road_length * 1.5893 / 100  * (1 + self.vat_electricity)
-        return (self.data_dict[year]['fuel_price_per_kwh'] * self.data_dict[year]['fuel_efficiency'] + \
-                self.data_dict[year]['work_electricity_price']) \
-                * road_length * 1.5893 / 100   
+            return (self.data_dict[year]['non_work_electricity_price']) * road_length * 1.5893 / 100  * (1 + self.vat_electricity)
+        return self.data_dict[year]['work_electricity_price'] * road_length * 1.5893 / 100   
 
     def get_non_fuel_efficiency(self, type, average_speed):
         if type == 'work':
@@ -234,7 +238,7 @@ class TransportationScheme:
         return self.maintenance_cost_A * 1.5893
     
     def build_cash_flows(self, benefits, m_costs, initial_investment):
-        return  [-initial_investment]  + [benefits[year] - m_costs[year] for year in range(2031, 2091)]
+        return  [-initial_investment]  + [benefits[year] - m_costs[year] for year in range(2031, self.end_year + 1)]
     
     def discount_every_year(self, values):
         '''对给定的每年收益按年折现'''
@@ -276,16 +280,21 @@ class TransportationScheme:
             discount_value += value / discount_factor  # 将该年的收益折现到2030年的价值，并累加到总值中
         
         return discount_value
+    
+
     def calculate_Payback_Period(self, benefits, costs, constant_cost):
-        for year in range(2031, 2091):
-            total_benefit = self.discount_to_2030(benefits, year)
-            total_cost = self.discount_to_2030(costs, year) + constant_cost
+        total_benefit = 0
+        total_cost = constant_cost
+        for year in range(2031, self.end_year + 1):
+            total_benefit += benefits[year]
+            total_cost += costs[year]
             if total_benefit > total_cost:
                 return year 
             
     def calculate_financial_metrics(self, cash_flow, all_benefit, maintenance_cost_A):
-        pvb = self.discount_to_2030(all_benefit, self.end_year)
-        pvc = self.discount_to_2030(maintenance_cost_A, self.end_year) - cash_flow[0]
+        pvb = sum(all_benefit.values())  # 计算PVB
+        pvc = sum(maintenance_cost_A.values()) - cash_flow[0]  # 计算PVC
+        
         npv = pvb - pvc
         bcr = pvb / pvc
 
@@ -316,9 +325,9 @@ class TransportationScheme:
         costs_benefits['GC_work_fuel_cost_A_O'][year] = self.get_GC_fuel(year, self.road_length_O)
         costs_benefits['GC_work_fuel_cost_O'][year] = self.get_GC_fuel(year, self.road_length_O)
         # 更新非工作时候的燃料成本, 考虑了VAT
-        costs_benefits['GC_non_work_fuel_cost_A'][year] = self.get_GC_fuel(year, self.road_length_A, True)
-        costs_benefits['GC_non_work_fuel_cost_A_O'][year] = self.get_GC_fuel(year, self.road_length_O, True)
-        costs_benefits['GC_non_work_fuel_cost_O'][year] = self.get_GC_fuel(year, self.road_length_O, True)
+        costs_benefits['GC_non_work_fuel_cost_A'][year] = self.get_GC_fuel(year, self.road_length_A, False)
+        costs_benefits['GC_non_work_fuel_cost_A_O'][year] = self.get_GC_fuel(year, self.road_length_O, False)
+        costs_benefits['GC_non_work_fuel_cost_O'][year] = self.get_GC_fuel(year, self.road_length_O, False)
 
         # 更新工作时非燃料成本
         costs_benefits['GC_work_non_fuel_A'][year] = self.get_GC_work_non_fuel(self.average_speed_A, self.road_length_A)
@@ -372,34 +381,64 @@ class TransportationScheme:
         print('self.transport_scheme_name:', self.transport_scheme_name)
         print('financial_metrics:', self.financial_metrics)
 
+    def format_numbers(self, numbers):
+        formatted_numbers = []
+        for number in numbers:
+            # 检查数字是否为None
+            if number is None:
+                formatted_numbers.append(None)
+            else:
+                # 格式化数字，保留两位小数，并使用逗号作为千位分隔符
+                formatted_number = f"{int(number):,}"
+                # 将格式化后的数字添加到结果列表中
+                formatted_numbers.append(formatted_number)
+        return formatted_numbers
+
     def prepare_data_for_excel(self, costs_benefits, financial_metrics):
-        
+
         data = {'Year': list(costs_benefits['all_benefit'].keys()),
-            'Fuel Work Benefit': list(costs_benefits['fuel_work_benefit'].values()),
-            'Non Fuel Work Benefit': list(costs_benefits['non_fuel_work_benefit'].values()),
-            'Fuel Non Work Benefit': list(costs_benefits['fuel_non_work_benefit'].values()),
-            'Non Fuel Non Work Benefit': list(costs_benefits['non_fuel_non_work_benefit'].values()),
-            'Indirect Tax Revenue': list(costs_benefits['indirect_tax_revenue'].values()),
-            'Journey Time Work Benefit': list(costs_benefits['journey_time_work_benefit'].values()),
-            'Journey Time Non Work Benefit': list(costs_benefits['journey_time_non_work_benefit'].values()),
-            'Emission Benefit': list(costs_benefits['emission_benefit'].values()),
-            'All Benefit': list(costs_benefits['all_benefit'].values()),
-            'Maintenance Cost': list(costs_benefits['maintenance_cost_A'].values()),
-            'Construction Cost': [costs_benefits['construction_cost_A']] + [None] * (len(costs_benefits['all_benefit']) - 1)
-              }
+                'Fuel Work Benefit(£)': self.format_numbers(list(costs_benefits['fuel_work_benefit'].values())),
+                'Non Fuel Work Benefit(£)': self.format_numbers(list(costs_benefits['non_fuel_work_benefit'].values())),
+                'Fuel Non Work Benefit(£)': self.format_numbers(list(costs_benefits['fuel_non_work_benefit'].values())),
+                'Non Fuel Non Work Benefit(£)': self.format_numbers(list(costs_benefits['non_fuel_non_work_benefit'].values())),
+                'Indirect Tax Revenue(£)': self.format_numbers(list(costs_benefits['indirect_tax_revenue'].values())),
+                'Journey Time Work Benefit(£)': self.format_numbers(list(costs_benefits['journey_time_work_benefit'].values())),
+                'Journey Time Non Work Benefit(£)': self.format_numbers(list(costs_benefits['journey_time_non_work_benefit'].values())),
+                'Emission Benefit(£)': self.format_numbers(list(costs_benefits['emission_benefit'].values())),
+                'All Benefit(£)': self.format_numbers(list(costs_benefits['all_benefit'].values())),
+                'Maintenance Cost(£)': self.format_numbers(list(costs_benefits['maintenance_cost_A'].values())),
+                'Construction Cost(£)': self.format_numbers([costs_benefits['construction_cost_A']] + [None] * (len(costs_benefits['all_benefit']) - 1))
+                }
     
         summary_data = {key: [value] for key, value in financial_metrics.items()}
 
         return pd.DataFrame(data), pd.DataFrame(summary_data)
-    
-    def save_data_to_excel(self, file_path):
-        
+    def save_data_to_csv(self, file_path):
         data, summary_data = self.prepare_data_for_excel(self.costs_benefits, self.financial_metrics)
-        with pd.ExcelWriter(file_path) as writer:
+        data.to_csv(file_path, index=False)
+    def save_data_to_excel(self, file_path):
+        data, summary_data = self.prepare_data_for_excel(self.costs_benefits, self.financial_metrics)
+        
+        with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
             data.to_excel(writer, sheet_name='Benefits and Costs', index=False)
             summary_data.to_excel(writer, sheet_name='Financial Indicators', index=False)
+            
+            # 无需调用 writer.save()，退出 with 代码块时会自动保存
+
+        # 使用openpyxl调整列宽
+        workbook = load_workbook(file_path)
+        for sheet_name in ['Benefits and Costs', 'Financial Indicators']:
+            worksheet = workbook[sheet_name]
+            for column in worksheet.columns:
+                max_length = max(len(str(cell.value)) if cell.value is not None else 0 for cell in column) + 5
+                worksheet.column_dimensions[get_column_letter(column[0].column)].width = max_length
+
+        # 保存调整列宽后的工作簿
+        workbook.save(file_path)
+
     
 
 if __name__ == '__main__':
-    scheme_A_low = TransportationScheme('voc.csv')
-    scheme_A_low.print_financial_metrics()
+    scheme_A_low = TransportationScheme()
+    scheme_A_low.get_things_done(discount_or_not=True)
+    scheme_A_low.save_data_to_csv('scheme_A_low.csv')
