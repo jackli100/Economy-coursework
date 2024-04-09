@@ -111,7 +111,7 @@ class TransportationScheme:
         ''''调用更新的方法，更新所有的成本和收益，还有现金流'''
         for year in range(2031, self.end_year + 1):
             self.update_costs_benefits_for_year(year, self.costs_benefits)
-        self.cash_flow = self.build_cash_flows(self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'], self.costs_benefits['construction_cost_A'])
+        self.cash_flow = self.build_cash_flows(self.costs_benefits['all_benefit'], self.costs_benefits['maintenance_cost_A'])
         if discount_or_not:
             for key, value in self.costs_benefits.items():
                 if key != 'construction_cost_A':
@@ -216,7 +216,7 @@ class TransportationScheme:
         GC_average = (GC_A * ratio * self.future_AADT_A[year] + GC_A_O * ratio * self.future_AADT_A_O[year]) \
             / (ratio * self.future_AADT_A[year] + ratio * self.future_AADT_A_O[year])
         if vat_charge:
-            return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year]) * 0.5 * 365.25 * (1 + self.t)
+            return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year] + self.future_AADT_O[year]) * 0.5 * 365.25 * (1 + self.t)
         return (GC_O - GC_average) * ratio *(self.future_AADT_A[year] + self.future_AADT_A_O[year] + self.future_AADT_O[year]) * 0.5 * 365.25
     
     def get_benefit_by_net(self, year, GC_A, GC_A_O, GC_O, ratio):
@@ -237,8 +237,8 @@ class TransportationScheme:
     def get_maintenance_cost(self):
         return self.maintenance_cost_A * 1.5893
     
-    def build_cash_flows(self, benefits, m_costs, initial_investment):
-        return  [-initial_investment]  + [benefits[year] - m_costs[year] for year in range(2031, self.end_year + 1)]
+    def build_cash_flows(self, benefits, m_costs, ):
+        return  [-self.construction_cost_A / 2 * 1.5893] + [-self.construction_cost_A /2 * 1.5893]  + [benefits[year] - m_costs[year] for year in range(2031, self.end_year + 1)]
     
     def discount_every_year(self, values):
         '''对给定的每年收益按年折现'''
@@ -281,7 +281,35 @@ class TransportationScheme:
         
         return discount_value
     
+    def calculate_irr(self, cash_flows, iterations=10000, tolerance=0.00001):
+        """
+        Calculate the Internal Rate of Return (IRR) for a series of cash flows.
+        This function uses a trial and error method by iteratively testing different rates.
 
+        Parameters:
+        - cash_flows: A list of cash flows (numbers), where the first value is the initial investment.
+        - iterations: The maximum number of iterations to perform.
+        - tolerance: The calculation stops when the NPV is within this tolerance.
+
+        Returns:
+        - The IRR as a decimal.
+        """
+        min_rate = -0.99  # The IRR cannot be less than -100%
+        max_rate = 1.0
+
+        for _ in range(iterations):
+            mid_rate = (min_rate + max_rate) / 2
+            npv = sum(cf / ((1 + mid_rate) ** i) for i, cf in enumerate(cash_flows))
+
+            if abs(npv) <= tolerance:
+                return mid_rate  # Found a rate close enough to zero NPV
+            elif npv > 0:
+                min_rate = mid_rate
+            else:
+                max_rate = mid_rate
+
+        return mid_rate  # Return the best estimate after exhausting iterations
+    
     def calculate_Payback_Period(self, benefits, costs, constant_cost):
         total_benefit = 0
         total_cost = constant_cost
@@ -293,16 +321,16 @@ class TransportationScheme:
             
     def calculate_financial_metrics(self, cash_flow, all_benefit, maintenance_cost_A):
         pvb = sum(all_benefit.values())  # 计算PVB
-        pvc = sum(maintenance_cost_A.values()) - cash_flow[0]  # 计算PVC
+        pvc = sum(maintenance_cost_A.values()) + self.costs_benefits['construction_cost_A'] # 计算PVC
         
         npv = pvb - pvc
         bcr = pvb / pvc
 
-        irr = npf.irr(cash_flow)  # 计算IRR
-        fyrr = cash_flow[1] / 1.035 / abs(cash_flow[0])  # 计算FYRR
+        irr = self.calculate_irr(cash_flow)  # 计算IRR
+        fyrr = cash_flow[2] / 1.035 / self.costs_benefits['construction_cost_A']  # 计算FYRR
         
         # 计算投资回收期
-        payback_period = self.calculate_Payback_Period(all_benefit, maintenance_cost_A, (-1) * cash_flow[0])
+        payback_period = self.calculate_Payback_Period(all_benefit, maintenance_cost_A, self.costs_benefits['construction_cost_A'])
         if payback_period is None:
             payback_period = 'N/A'
         else:
@@ -435,10 +463,20 @@ class TransportationScheme:
 
         # 保存调整列宽后的工作簿
         workbook.save(file_path)
-
+    def get_sum_of_costs_and_benefits(self):
+        sum_of_costs_and_benefits = {}
+        for key, value in self.costs_benefits.items():
+            if 'GC' not in key and 'all' not in key:
+                if key == 'construction_cost_A':
+                    sum_of_costs_and_benefits[key] = value * (-1)
+                elif key == 'maintenance_cost_A':   
+                    sum_of_costs_and_benefits[key] = - sum(value.values())
+                else:
+                    sum_of_costs_and_benefits[key] = sum(value.values())
+        return sum_of_costs_and_benefits
     
 
 if __name__ == '__main__':
     scheme_A_low = TransportationScheme()
     scheme_A_low.get_things_done(discount_or_not=True)
-    scheme_A_low.save_data_to_csv('scheme_A_low.csv')
+    scheme_A_low.save_data_to_excel('scheme_A_low.xlsx')
